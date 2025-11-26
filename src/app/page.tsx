@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ShoppingBag,
   Search,
@@ -53,14 +53,20 @@ interface Order {
   customer: CheckoutData;
   items: CartItem[];
   total: number;
-  status: 'Pending' | 'Paid' | 'Completed';
+  status: 'Pending' | 'Paid' | 'Completed' | 'Waiting for Payment';
   paymentMethod: string;
+  paymentDetails?: {
+    accountName: string;
+    vaNumber: string;
+    expiryTime: string;
+  };
 }
 
 interface PaymentMethodOption {
   id: string;
   name: string;
   icon: string;
+  type: 'VA' | 'EWALLET' | 'COD';
 }
 
 type ViewState =
@@ -84,7 +90,7 @@ const INITIAL_PRODUCTS: Product[] = [
     price: 45000,
     category: 'Telur',
     image:
-      'https://images.unsplash.com/photo-1516467508483-a72120608ae0?auto=format&fit=crop&w=800&q=80',
+      'https://images.unsplash.com/photo-1563822248828-fd50acca9ad0?q=80&w=687&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
     description:
       'Telur ayam kampung asli, kaya omega 3, dipanen setiap pagi. Cocok untuk kesehatan keluarga.',
     stock: 50,
@@ -108,7 +114,7 @@ const INITIAL_PRODUCTS: Product[] = [
     price: 42000,
     category: 'Daging Ayam',
     image:
-      'https://images.unsplash.com/photo-1587593810167-a84920ea0781?auto=format&fit=crop&w=800&q=80',
+      'https://images.unsplash.com/photo-1759493321741-883fbf9f433c?q=80&w=1170&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
     description:
       'Bagian paha ayam yang juicy dan lembut. Sangat cocok untuk ayam bakar atau goreng.',
     stock: 40,
@@ -132,7 +138,8 @@ const INITIAL_PRODUCTS: Product[] = [
     price: 35000,
     category: 'Daging Ayam',
     image:
-      'https://images.unsplash.com/photo-1615937651188-4b92cd87d6e0?auto=format&fit=crop&w=800&q=80',
+      // 'https://images.unsplash.com/photo-1672787153652-b3b9d92f3e8c?q=80&w=1170&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
+      'https://images.unsplash.com/photo-1672787153720-e85fe802fd9f?q=80&w=1887&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
     description: 'Ayam utuh segar, pemotongan syariah, bersih dari bulu.',
     stock: 15,
     unit: 'ekor',
@@ -140,9 +147,20 @@ const INITIAL_PRODUCTS: Product[] = [
 ];
 
 const PAYMENT_METHODS: PaymentMethodOption[] = [
-  { id: 'bca', name: 'BCA Virtual Account', icon: '🏦' },
-  { id: 'gopay', name: 'GoPay / QRIS', icon: '📱' },
-  { id: 'cod', name: 'Cash on Delivery', icon: '💵' },
+  {
+    id: 'bca_va',
+    name: 'BCA Virtual Account (Midtrans)',
+    icon: '🏦',
+    type: 'VA',
+  },
+  {
+    id: 'permata_va',
+    name: 'Permata Virtual Account (Midtrans)',
+    icon: '💳',
+    type: 'VA',
+  },
+  { id: 'gopay', name: 'GoPay / QRIS (Midtrans)', icon: '📱', type: 'EWALLET' },
+  { id: 'cod', name: 'Cash on Delivery', icon: '💵', type: 'COD' },
 ];
 
 /**
@@ -154,6 +172,48 @@ const formatIDR = (price: number): string => {
     currency: 'IDR',
     minimumFractionDigits: 0,
   }).format(price);
+};
+
+// SIMULASI MIDTRANS PAYMENT GENERATION
+const generatePaymentDetails = (
+  methodId: string,
+  total: number
+): Order['paymentDetails'] => {
+  const baseDetails = {
+    expiryTime: new Date(Date.now() + 24 * 60 * 60 * 1000).toLocaleString(
+      'id-ID',
+      {
+        hour: '2-digit',
+        minute: '2-digit',
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      }
+    ), // 24 hours expiry
+  };
+
+  switch (methodId) {
+    case 'bca_va':
+      return {
+        ...baseDetails,
+        accountName: 'BCA',
+        vaNumber: '7008890123456789',
+      };
+    case 'permata_va':
+      return {
+        ...baseDetails,
+        accountName: 'Permata Bank',
+        vaNumber: '852029876543210',
+      };
+    case 'gopay':
+      return {
+        ...baseDetails,
+        accountName: 'GOPAY',
+        vaNumber: 'QR Code Generated (Simulasi)',
+      };
+    default:
+      return undefined;
+  }
 };
 
 /**
@@ -242,6 +302,7 @@ export default function App() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [lastOrder, setLastOrder] = useState<Order | null>(null); // NEW STATE FOR ORDER DATA
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
 
@@ -255,6 +316,33 @@ export default function App() {
     address: '',
     paymentMethod: '',
   });
+
+  // --- SEARCH LOGIC FIX ---
+  // Gunakan useEffect untuk mengubah tampilan SAAT query sudah berubah dan hanya jika perlu
+  useEffect(() => {
+    // Jika ada query pencarian dan tampilan BUKAN Shop, pindahkan ke Shop.
+    // Ini mencegah input kehilangan fokus karena state view diubah saat on change.
+    if (searchQuery.length > 0 && view !== 'shop') {
+      // Mengatur view dalam timeout 0ms memungkinkan event onChange menyelesaikan prosesnya
+      // sebelum state view berubah, menjaga fokus.
+      const timer = setTimeout(() => {
+        setView('shop');
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+    // Jika query kosong dan tampilan saat ini adalah Shop, kita tidak perlu otomatis pindah ke Home.
+    // Membiarkan user di Shop setelah menghapus query adalah UX yang baik.
+  }, [searchQuery, view]);
+
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const query = e.target.value;
+    setSearchQuery(query);
+    // Logika pindah halaman sekarang ditangani di useEffect di atas.
+  };
+
+  const clearSearch = () => {
+    setSearchQuery('');
+  };
 
   // --- ACTIONS ---
 
@@ -292,19 +380,35 @@ export default function App() {
   };
 
   const processPayment = () => {
-    // Simulate API call
+    const selectedMethod = PAYMENT_METHODS.find(
+      (m) => m.id === checkoutData.paymentMethod
+    );
+    const total = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
+    const isMidtrans = selectedMethod?.type !== 'COD';
+
     setTimeout(() => {
+      const paymentDetails = isMidtrans
+        ? generatePaymentDetails(checkoutData.paymentMethod, total)
+        : undefined;
+
       const newOrder: Order = {
         id: `ORD-${Date.now()}`,
         date: new Date().toLocaleDateString('id-ID'),
         customer: checkoutData,
         items: cart,
-        total: cart.reduce((sum, item) => sum + item.price * item.qty, 0),
-        status: 'Paid',
-        paymentMethod: checkoutData.paymentMethod,
+        total: total,
+        status: isMidtrans ? 'Waiting for Payment' : 'Pending',
+        paymentMethod: selectedMethod?.name || 'Unknown',
+        paymentDetails: paymentDetails,
       };
+
       setOrders((prev) => [newOrder, ...prev]);
       setCart([]);
+
+      // FIX: Use the new state variable setLastOrder for the Order object.
+      setLastOrder(newOrder);
+      setSelectedProduct(null); // Clear selected product just in case
+
       setView('success');
     }, 1500);
   };
@@ -336,13 +440,19 @@ export default function App() {
           {/* Desktop Nav */}
           <div className='hidden md:flex items-center space-x-8'>
             <button
-              onClick={() => setView('home')}
+              onClick={() => {
+                setView('home');
+                clearSearch();
+              }}
               className={`text-sm font-medium ${view === 'home' ? 'text-orange-500' : 'text-stone-600 hover:text-orange-500'}`}
             >
               Home
             </button>
             <button
-              onClick={() => setView('shop')}
+              onClick={() => {
+                setView('shop');
+                clearSearch();
+              }}
               className={`text-sm font-medium ${view === 'shop' ? 'text-orange-500' : 'text-stone-600 hover:text-orange-500'}`}
             >
               Shop
@@ -360,17 +470,27 @@ export default function App() {
           {/* Actions */}
           <div className='flex items-center gap-4'>
             <div className='hidden md:flex relative group'>
+              {/* Penting: Tambahkan key agar elemen input tidak di-reset saat state berubah */}
               <input
+                key='desktop-search'
                 type='text'
                 placeholder='Cari ayam, telur...'
-                className='pl-10 pr-4 py-2 rounded-full bg-stone-100 text-sm focus:outline-none focus:ring-2 focus:ring-orange-200 w-48 transition-all focus:w-64'
+                className='pl-10 pr-10 py-2 rounded-full bg-stone-100 text-sm focus:outline-none focus:ring-2 focus:ring-orange-200 w-48 transition-all focus:w-64'
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={handleSearchChange}
               />
               <Search
                 className='absolute left-3 top-2.5 text-stone-400'
                 size={18}
               />
+              {searchQuery && (
+                <button
+                  onClick={clearSearch}
+                  className='absolute right-3 top-2.5 text-stone-400 hover:text-stone-600'
+                >
+                  <X size={16} />
+                </button>
+              )}
             </div>
 
             <div
@@ -429,14 +549,18 @@ export default function App() {
       {isMobileMenuOpen && (
         <div className='md:hidden bg-white border-b border-stone-100 px-4 py-4 space-y-4'>
           <input
+            key='mobile-search'
             type='text'
             placeholder='Search...'
             className='w-full pl-4 pr-4 py-2 rounded-lg bg-stone-100 text-sm'
+            value={searchQuery}
+            onChange={handleSearchChange}
           />
           <div className='flex flex-col space-y-2'>
             <button
               onClick={() => {
                 setView('home');
+                clearSearch();
                 setIsMobileMenuOpen(false);
               }}
               className='text-left font-medium py-2'
@@ -446,6 +570,7 @@ export default function App() {
             <button
               onClick={() => {
                 setView('shop');
+                clearSearch();
                 setIsMobileMenuOpen(false);
               }}
               className='text-left font-medium py-2'
@@ -455,6 +580,7 @@ export default function App() {
             <button
               onClick={() => {
                 setUser('admin');
+                setView('admin');
                 setIsMobileMenuOpen(false);
               }}
               className='text-left font-medium py-2 text-orange-500'
@@ -599,38 +725,63 @@ export default function App() {
     </div>
   );
 
-  const ShopView = () => (
-    <div className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12'>
-      <div className='flex flex-col md:flex-row justify-between items-end mb-8 gap-4'>
-        <div>
-          <h2 className='text-3xl font-bold text-stone-800'>
-            Belanja Produk Segar
-          </h2>
-          <p className='text-stone-500 mt-2'>Pilih produk favoritmu hari ini</p>
-        </div>
-        <div className='flex gap-2 overflow-x-auto pb-2'>
-          {['Semua', 'Telur', 'Daging Ayam'].map((cat) => (
-            <button
-              key={cat}
-              className='px-4 py-2 rounded-full border border-stone-200 text-sm font-medium hover:bg-orange-50 hover:border-orange-200 hover:text-orange-600 whitespace-nowrap bg-white'
-            >
-              {cat}
-            </button>
-          ))}
-        </div>
-      </div>
+  const ShopView = () => {
+    // Filter logika pencarian (Nama atau Kategori)
+    const filteredProducts = products.filter(
+      (p) =>
+        p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.category.toLowerCase().includes(searchQuery.toLowerCase())
+    );
 
-      <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8'>
-        {products
-          .filter((p) =>
-            p.name.toLowerCase().includes(searchQuery.toLowerCase())
-          )
-          .map((product) => (
-            <ProductCard key={product.id} product={product} />
-          ))}
+    return (
+      <div className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12'>
+        <div className='flex flex-col md:flex-row justify-between items-end mb-8 gap-4'>
+          <div>
+            <h2 className='text-3xl font-bold text-stone-800'>
+              {searchQuery
+                ? `Hasil Pencarian: "${searchQuery}"`
+                : 'Belanja Produk Segar'}
+            </h2>
+            <p className='text-stone-500 mt-2'>
+              {searchQuery
+                ? `Ditemukan ${filteredProducts.length} produk`
+                : 'Pilih produk favoritmu hari ini'}
+            </p>
+          </div>
+          {!searchQuery && (
+            <div className='flex gap-2 overflow-x-auto pb-2'>
+              {['Semua', 'Telur', 'Daging Ayam'].map((cat) => (
+                // Simulasi filter kategori sederhana (tidak diimplementasikan)
+                <button
+                  key={cat}
+                  className='px-4 py-2 rounded-full border border-stone-200 text-sm font-medium hover:bg-orange-50 hover:border-orange-200 hover:text-orange-600 whitespace-nowrap bg-white'
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {filteredProducts.length > 0 ? (
+          <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8'>
+            {filteredProducts.map((product) => (
+              <ProductCard key={product.id} product={product} />
+            ))}
+          </div>
+        ) : (
+          <div className='text-center py-20 text-stone-500'>
+            <p className='mb-4'>
+              Produk tidak ditemukan untuk kata kunci: **{searchQuery}**.
+            </p>
+            <Button variant='ghost' onClick={clearSearch}>
+              Hapus Pencarian
+            </Button>
+          </div>
+        )}
       </div>
-    </div>
-  );
+    );
+  };
 
   const ProductDetailView = () => {
     if (!selectedProduct) return null;
@@ -745,6 +896,7 @@ export default function App() {
                   <div className='flex items-center gap-3 bg-stone-50 rounded-lg p-1'>
                     <button
                       onClick={() => updateQty(item.id, -1)}
+                      disabled={item.qty <= 1}
                       className='w-7 h-7 rounded-md bg-white shadow-sm flex items-center justify-center text-stone-600 hover:bg-orange-100 hover:text-orange-600 disabled:opacity-50'
                     >
                       <Minus size={14} />
@@ -778,13 +930,15 @@ export default function App() {
                     <span>{formatIDR(total)}</span>
                   </div>
                   <div className='flex justify-between text-sm text-stone-600'>
-                    <span>Pajak (0%)</span>
-                    <span>Rp 0</span>
+                    <span>Biaya Layanan (Midtrans Simulasi)</span>
+                    <span>Rp 2.500</span>
                   </div>
                 </div>
                 <div className='flex justify-between font-bold text-lg text-stone-800 mb-6'>
                   <span>Total</span>
-                  <span className='text-orange-600'>{formatIDR(total)}</span>
+                  <span className='text-orange-600'>
+                    {formatIDR(total + 2500)}
+                  </span>
                 </div>
                 <Button className='w-full' onClick={handleCheckout}>
                   Checkout Sekarang
@@ -799,6 +953,7 @@ export default function App() {
 
   const CheckoutView = () => {
     const total = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
+    const totalFinal = total + 2500; // Total + Biaya Layanan
     const [loading, setLoading] = useState(false);
 
     const onSubmit = (e: React.FormEvent) => {
@@ -886,7 +1041,7 @@ export default function App() {
             <div className='space-y-4'>
               <h3 className='font-bold text-stone-800 flex items-center gap-2'>
                 <CreditCard size={20} className='text-orange-500' /> Metode
-                Pembayaran
+                Pembayaran (Midtrans Simulasi)
               </h3>
               <div className='grid md:grid-cols-3 gap-4'>
                 {PAYMENT_METHODS.map((method) => (
@@ -910,12 +1065,16 @@ export default function App() {
             {/* Summary */}
             <div className='bg-stone-50 p-6 rounded-xl space-y-2'>
               <div className='flex justify-between text-stone-600'>
-                <span>Total Barang</span>
-                <span>{cart.length} item</span>
+                <span>Subtotal</span>
+                <span>{formatIDR(total)}</span>
               </div>
-              <div className='flex justify-between text-lg font-bold text-stone-800 border-t border-stone-200 pt-2'>
+              <div className='flex justify-between text-stone-600 border-b border-stone-200 pb-2'>
+                <span>Biaya Layanan</span>
+                <span>{formatIDR(2500)}</span>
+              </div>
+              <div className='flex justify-between text-lg font-bold text-stone-800 pt-2'>
                 <span>Total Bayar</span>
-                <span className='text-orange-600'>{formatIDR(total)}</span>
+                <span className='text-orange-600'>{formatIDR(totalFinal)}</span>
               </div>
             </div>
 
@@ -924,7 +1083,9 @@ export default function App() {
               disabled={loading || !checkoutData.paymentMethod}
               className='w-full h-14 text-lg'
             >
-              {loading ? 'Memproses...' : `Bayar ${formatIDR(total)}`}
+              {loading
+                ? 'Memproses Pesanan...'
+                : `Bayar ${formatIDR(totalFinal)}`}
             </Button>
           </form>
         </div>
@@ -932,32 +1093,153 @@ export default function App() {
     );
   };
 
-  const SuccessView = () => (
-    <div className='min-h-[60vh] flex flex-col items-center justify-center text-center px-4'>
-      <div className='w-24 h-24 bg-green-100 rounded-full flex items-center justify-center text-green-600 mb-6 animate-bounce'>
-        <CheckCircle size={48} />
+  const SuccessView = () => {
+    // FIX: Menggunakan state 'lastOrder' yang benar
+    if (!lastOrder) return null;
+
+    const isVaPayment =
+      lastOrder.paymentDetails?.vaNumber &&
+      lastOrder.paymentDetails.accountName !== 'GOPAY';
+    const isEwallet = lastOrder.paymentDetails?.accountName === 'GOPAY';
+    const isCod = lastOrder.paymentMethod === 'Cash on Delivery';
+
+    return (
+      <div className='max-w-3xl mx-auto px-4 py-12'>
+        <div className='bg-white rounded-3xl shadow-lg border border-stone-100 overflow-hidden text-center'>
+          <div
+            className={`p-8 ${isCod ? 'bg-orange-500' : 'bg-green-500'} text-white`}
+          >
+            <div className='w-16 h-16 bg-white/30 rounded-full flex items-center justify-center mx-auto mb-4'>
+              <CheckCircle size={32} className='text-white' />
+            </div>
+            <h2 className='text-3xl font-bold mb-1'>
+              Pesanan Berhasil Dibuat!
+            </h2>
+            <p className='font-medium'>
+              {isCod ? 'Menunggu Konfirmasi' : 'Langkah Pembayaran'}
+            </p>
+          </div>
+
+          <div className='p-8 text-left space-y-6'>
+            <div className='bg-stone-50 p-4 rounded-xl space-y-1'>
+              <p className='text-xs text-stone-400'>ID Pesanan</p>
+              <p className='font-bold text-lg text-stone-800'>{lastOrder.id}</p>
+              <p className='text-xs text-stone-400'>
+                Tanggal: {lastOrder.date}
+              </p>
+            </div>
+
+            <div className='border border-stone-100 rounded-xl p-4'>
+              <div className='flex justify-between items-center mb-3 border-b border-stone-100 pb-3'>
+                <h3 className='font-bold text-stone-800'>Total Bayar</h3>
+                <span className='text-2xl font-bold text-orange-600'>
+                  {formatIDR(lastOrder.total + 2500)}
+                </span>
+              </div>
+
+              <h3 className='font-bold text-stone-800 mb-3'>
+                Metode: {lastOrder.paymentMethod}
+              </h3>
+
+              {isVaPayment && (
+                <div className='bg-orange-50 p-4 rounded-lg space-y-2'>
+                  <p className='text-xs font-medium text-stone-500'>
+                    Nomor Virtual Account (
+                    {lastOrder.paymentDetails?.accountName})
+                  </p>
+                  <div className='flex justify-between items-center'>
+                    <span className='text-xl font-extrabold text-orange-700'>
+                      {lastOrder.paymentDetails?.vaNumber}
+                    </span>
+                    <Button variant='outline' className='py-1 px-3 text-sm'>
+                      Salin
+                    </Button>
+                  </div>
+                  <p className='text-xs text-red-500'>
+                    Batas Waktu Pembayaran: **
+                    {lastOrder.paymentDetails?.expiryTime}**
+                  </p>
+                </div>
+              )}
+
+              {isEwallet && (
+                <div className='bg-orange-50 p-4 rounded-lg text-center'>
+                  <p className='text-sm font-medium text-orange-700 mb-2'>
+                    Segera buka aplikasi GoPay/E-Wallet Anda.
+                  </p>
+                  <p className='text-xs text-stone-600'>
+                    Anda akan diminta untuk scan QRIS atau konfirmasi pembayaran
+                    dalam waktu **{lastOrder.paymentDetails?.expiryTime}**.
+                  </p>
+                </div>
+              )}
+
+              {isCod && (
+                <div className='bg-green-50 p-4 rounded-lg text-center'>
+                  <p className='text-sm font-medium text-green-700'>
+                    Pembayaran Tunai (Cash on Delivery) akan dilakukan saat
+                    pesanan tiba.
+                  </p>
+                  <p className='text-xs text-stone-600 mt-1'>
+                    Siapkan uang tunai sebesar{' '}
+                    {formatIDR(lastOrder.total + 2500)}.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className='flex gap-4 pt-4'>
+              <Button onClick={() => setView('shop')} className='flex-1'>
+                Belanja Lagi
+              </Button>
+              <Button
+                variant='outline'
+                onClick={() => setView('home')}
+                className='flex-1'
+              >
+                Kembali ke Home
+              </Button>
+            </div>
+          </div>
+        </div>
       </div>
-      <h2 className='text-3xl font-bold text-stone-800 mb-2'>
-        Pesanan Berhasil!
-      </h2>
-      <p className='text-stone-500 max-w-md mb-8'>
-        Terima kasih telah berbelanja. ID Pesanan Anda:{' '}
-        <strong>{orders[0]?.id}</strong>. Kami akan segera memproses pengiriman.
-      </p>
-      <div className='flex gap-4'>
-        <Button onClick={() => setView('home')}>Kembali ke Home</Button>
-        <Button variant='outline' onClick={() => setView('shop')}>
-          Belanja Lagi
-        </Button>
-      </div>
-    </div>
-  );
+    );
+  };
 
   // --- ADMIN DASHBOARD ---
   const AdminDashboard = () => {
     // Stats
-    const totalSales = orders.reduce((sum, o) => sum + o.total, 0);
+    const totalSales = orders
+      .filter((o) => o.status !== 'Waiting for Payment')
+      .reduce((sum, o) => sum + o.total, 0);
     const totalOrders = orders.length;
+
+    const OrderRow = ({ order }: { order: Order }) => {
+      const getStatusColor = (status: Order['status']) => {
+        switch (status) {
+          case 'Paid':
+          case 'Completed':
+            return 'green';
+          case 'Waiting for Payment':
+          case 'Pending':
+            return 'orange';
+          default:
+            return 'stone';
+        }
+      };
+      return (
+        <tr className='hover:bg-stone-50 transition-colors'>
+          <td className='py-3 font-medium'>{order.id}</td>
+          <td className='py-3'>{order.customer.name}</td>
+          <td className='py-3 text-orange-600 font-bold'>
+            {formatIDR(order.total + 2500)}
+          </td>
+          <td className='py-3'>
+            <Badge color={getStatusColor(order.status)}>{order.status}</Badge>
+          </td>
+        </tr>
+      );
+    };
 
     return (
       <div className='flex min-h-screen bg-stone-50'>
@@ -1029,7 +1311,9 @@ export default function App() {
                       <CreditCard />
                     </div>
                     <div>
-                      <p className='text-stone-500 text-sm'>Total Sales</p>
+                      <p className='text-stone-500 text-sm'>
+                        Total Sales (Paid)
+                      </p>
                       <h3 className='text-2xl font-bold text-stone-800'>
                         {formatIDR(totalSales)}
                       </h3>
@@ -1067,30 +1351,23 @@ export default function App() {
                       Belum ada order masuk.
                     </p>
                   ) : (
-                    <table className='w-full text-sm text-left'>
-                      <thead className='text-stone-400 font-medium border-b border-stone-100'>
-                        <tr>
-                          <th className='pb-3'>ID</th>
-                          <th className='pb-3'>Customer</th>
-                          <th className='pb-3'>Total</th>
-                          <th className='pb-3'>Status</th>
-                        </tr>
-                      </thead>
-                      <tbody className='divide-y divide-stone-100'>
-                        {orders.map((o) => (
-                          <tr key={o.id}>
-                            <td className='py-3 font-medium'>{o.id}</td>
-                            <td className='py-3'>{o.customer.name}</td>
-                            <td className='py-3 text-orange-600 font-bold'>
-                              {formatIDR(o.total)}
-                            </td>
-                            <td className='py-3'>
-                              <Badge color='green'>{o.status}</Badge>
-                            </td>
+                    <div className='overflow-x-auto'>
+                      <table className='w-full text-sm text-left'>
+                        <thead className='text-stone-400 font-medium border-b border-stone-100'>
+                          <tr>
+                            <th className='pb-3'>ID</th>
+                            <th className='pb-3'>Customer</th>
+                            <th className='pb-3'>Total</th>
+                            <th className='pb-3'>Status</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody className='divide-y divide-stone-100'>
+                          {orders.slice(0, 5).map((o) => (
+                            <OrderRow key={o.id} order={o} />
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   )}
                 </Card>
               </div>
@@ -1103,7 +1380,7 @@ export default function App() {
                   <h3 className='font-bold text-stone-800'>
                     Inventory Management
                   </h3>
-                  <Button>
+                  <Button size='sm'>
                     <Plus size={16} /> Add Product
                   </Button>
                 </div>
@@ -1162,39 +1439,30 @@ export default function App() {
             {/* Orders Tab */}
             {adminTab === 'orders' && (
               <Card className='p-6'>
-                <h3 className='font-bold text-stone-800 mb-6'>Order History</h3>
+                <h3 className='font-bold text-stone-800 mb-6'>
+                  Order History ({orders.length} Total)
+                </h3>
                 {orders.length === 0 ? (
                   <div className='text-center py-12 text-stone-400'>
                     No orders yet.
                   </div>
                 ) : (
-                  <div className='space-y-4'>
-                    {orders.map((o) => (
-                      <div
-                        key={o.id}
-                        className='border border-stone-100 rounded-xl p-4 flex justify-between items-center hover:shadow-md transition-shadow bg-white'
-                      >
-                        <div>
-                          <div className='flex items-center gap-3 mb-1'>
-                            <span className='font-bold text-stone-800'>
-                              {o.id}
-                            </span>
-                            <Badge color='green'>{o.status}</Badge>
-                          </div>
-                          <p className='text-sm text-stone-500'>
-                            {o.date} • {o.customer.name}
-                          </p>
-                        </div>
-                        <div className='text-right'>
-                          <p className='font-bold text-orange-600 text-lg'>
-                            {formatIDR(o.total)}
-                          </p>
-                          <p className='text-xs text-stone-400'>
-                            {o.paymentMethod.toUpperCase()}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
+                  <div className='overflow-x-auto'>
+                    <table className='w-full text-sm text-left'>
+                      <thead className='text-stone-400 font-medium border-b border-stone-100'>
+                        <tr>
+                          <th className='pb-3'>ID</th>
+                          <th className='pb-3'>Customer</th>
+                          <th className='pb-3'>Total</th>
+                          <th className='pb-3'>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className='divide-y divide-stone-100'>
+                        {orders.map((o) => (
+                          <OrderRow key={o.id} order={o} />
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </Card>
@@ -1286,13 +1554,10 @@ export default function App() {
     <div className='min-h-screen bg-white font-sans text-stone-800 selection:bg-orange-100'>
       <Navbar />
       <main className='min-h-screen pb-20'>
-        {view === 'home' && (
-          <>
-            <HeroSection />
-            <ShopView />
-          </>
-        )}
-        {view === 'shop' && <ShopView />}
+        {/* Render Home or Shop based on query and view state */}
+        {view === 'home' && searchQuery.length === 0 && <HeroSection />}
+        {(view === 'home' || view === 'shop') && <ShopView />}
+
         {view === 'product_detail' && <ProductDetailView />}
         {view === 'cart' && <CartView />}
         {view === 'checkout' && <CheckoutView />}
